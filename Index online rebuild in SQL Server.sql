@@ -1,0 +1,21 @@
+-- Maintenance for the index of a table
+ALTER INDEX [INDEX_NAME] ON [dbo].[TABLE_NAME] REBUILD PARTITION = ALL WITH ( ONLINE = ON)
+
+-- Maintenance for the all index of a table
+SET QUOTED_IDENTIFIER ON; ALTER INDEX ALL ON [TABLE_NAME] REBUILD;
+
+-- Update Statistics for all statistics in an object
+Update STATISTICS [TABLE_NAME]
+
+-- Update specific statistics
+Update STATISTICS [TABLE_NAME] IX_STATISTICS_NAME
+
+-- Update Statistics with FULL Scan
+Update STATISTICS [TABLE_NAME] IX_STATISTICS_NAME WITH FULLSCAN
+Update STATISTICS [TABLE_NAME] IX_STATISTICS_NAME WITH SAMPLE 100 PERCENT
+Update STATISTICS [TABLE_NAME] IX_STATISTICS_NAME WITH SAMPLE 10 PERCENT
+Update STATISTICS [TABLE_NAME] IX_STATISTICS_NAME WITH SAMPLE 1000 ROWS
+Update STATISTICS [TABLE_NAME]  WITH FULLSCAN, COLUMNS
+
+-- Full table statistics maintenance
+exec sp_updatestats
