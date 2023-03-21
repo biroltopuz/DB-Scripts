@@ -15,7 +15,6 @@ KILL 554 with STATUSONLY
 select spid, status, loginame, hostname, blocked, db_name(dbid), cmd from master..sysprocesses where db_name(dbid) = 'YourDatabaseName'
 kill 554;
 
-
 -- Kill all database session
 declare @spid smallint
 declare @tString nvarchar(100)
