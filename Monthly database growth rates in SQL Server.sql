@@ -7,5 +7,5 @@ FROM (
 	CAST((LAG(s.backup_size) OVER (PARTITION BY s.database_name ORDER BY s.backup_start_date) / 1024 / 1024) AS INT) AS Previous_Backup_Size
 	FROM msdb..backupset s
 	WHERE s.type = 'D' --full backup
-	and s.database_name='YourDatabaseName'
+	and s.database_name='[DATABASE_NAME]'
 ) T GROUP BY DATABASE_NAME, MONTH(backup_start_date), YEAR(backup_start_date)
