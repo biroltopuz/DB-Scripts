@@ -10,7 +10,6 @@ SELECT @@SPID AS CurrentSPID;
 -- No kill, just check the estimated roll back time
 KILL 554 with STATUSONLY
 
-
 -- Kill one session
 select spid, status, loginame, hostname, blocked, db_name(dbid), cmd from master..sysprocesses where db_name(dbid) = '[DATABASE_NAME]'
 -- Sample =>  Kill 554
