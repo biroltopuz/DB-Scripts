@@ -1,83 +1,7 @@
 -- First day of the month
 select DATEADD(MONTH, DATEDIFF(MONTH, 0, GETDATE()), 0)
 
-
-How to convert from string to datetime?
-Execute the following T-SQL scripts in Microsoft SQL Server Management Studio (SSMS) Query Editor to demonstrate T-SQL CONVERT and CAST functions in transforming string SQL date formats, string time & string datetime data to datetime data type. 
-Practical examples for T-SQL DATE / DATETIME functions.
-
--- SQL Server string to date / datetime conversion - datetime string format sql server
--- MSSQL string to datetime conversion - convert char to date - convert varchar to date
--- Subtract 100 from style number (format) for yy instead yyyy (or ccyy with century)
-SELECT convert(datetime, 'Oct 23 2012 11:01AM', 100) -- mon dd yyyy hh:mmAM (or PM)
-SELECT convert(datetime, 'Oct 23 2012 11:01AM') -- 2012-10-23 11:01:00.000
  
--- Without century (yy) string date conversion - convert string to datetime function
-SELECT convert(datetime, 'Oct 23 12 11:01AM', 0) -- mon dd yy hh:mmAM (or PM)
-SELECT convert(datetime, 'Oct 23 12 11:01AM') -- 2012-10-23 11:01:00.000
- 
--- Convert string to datetime sql - convert string to date sql - sql dates format
--- T-SQL convert string to datetime - SQL Server convert string to date
-SELECT convert(datetime, '10/23/2016', 101) -- mm/dd/yyyy
-SELECT convert(datetime, '2016.10.23', 102) -- yyyy.mm.dd ANSI date with century
-SELECT convert(datetime, '23/10/2016', 103) -- dd/mm/yyyy
-SELECT convert(datetime, '23.10.2016', 104) -- dd.mm.yyyy
-SELECT convert(datetime, '23-10-2016', 105) -- dd-mm-yyyy
--- mon types are nondeterministic conversions, dependent on language setting
-SELECT convert(datetime, '23 OCT 2016', 106) -- dd mon yyyy
-SELECT convert(datetime, 'Oct 23, 2016', 107) -- mon dd, yyyy
--- 2016-10-23 00:00:00.000
-SELECT convert(datetime, '20:10:44', 108) -- hh:mm:ss
--- 1900-01-01 20:10:44.000
- 
--- mon dd yyyy hh:mm:ss:mmmAM (or PM) - sql time format - SQL Server datetime format
-SELECT convert(datetime, 'Oct 23 2016 11:02:44:013AM', 109)
--- 2016-10-23 11:02:44.013
-SELECT convert(datetime, '10-23-2016', 110) -- mm-dd-yyyy
-SELECT convert(datetime, '2016/10/23', 111) -- yyyy/mm/dd
--- YYYYMMDD ISO date format works at any language setting - international standard
-SELECT convert(datetime, '20161023')
-SELECT convert(datetime, '20161023', 112) -- ISO yyyymmdd
--- 2016-10-23 00:00:00.000
-SELECT convert(datetime, '23 Oct 2016 11:02:07:577', 113) -- dd mon yyyy hh:mm:ss:mmm
--- 2016-10-23 11:02:07.577
-SELECT convert(datetime, '20:10:25:300', 114) -- hh:mm:ss:mmm(24h)
--- 1900-01-01 20:10:25.300
-SELECT convert(datetime, '2016-10-23 20:44:11', 120) -- yyyy-mm-dd hh:mm:ss(24h)
--- 2016-10-23 20:44:11.000
-SELECT convert(datetime, '2016-10-23 20:44:11.500', 121) -- yyyy-mm-dd hh:mm:ss.mmm
--- 2016-10-23 20:44:11.500
- 
--- Style 126 is ISO 8601 format: international standard - works with any language setting
-SELECT convert(datetime, '2008-10-23T18:52:47.513', 126) -- yyyy-mm-ddThh:mm:ss(.mmm)
--- 2008-10-23 18:52:47.513
-SELECT convert(datetime, N'23 شوال 1429  6:52:47:513PM', 130) -- Islamic/Hijri date
-SELECT convert(datetime, '23/10/1429  6:52:47:513PM',    131) -- Islamic/Hijri date
- 
--- Convert DDMMYYYY format to datetime - sql server to date / datetime
-SELECT convert(datetime, STUFF(STUFF('31012016',3,0,'-'),6,0,'-'), 105)
--- 2016-01-31 00:00:00.000
--- SQL Server T-SQL string to datetime conversion without century - some exceptions
--- nondeterministic means language setting dependent such as Mar/Mär/mars/márc
-SELECT convert(datetime, 'Oct 23 16 11:02:44AM') -- Default
-SELECT convert(datetime, '10/23/16', 1) -- mm/dd/yy U.S.
-SELECT convert(datetime, '16.10.23', 2) -- yy.mm.dd ANSI
-SELECT convert(datetime, '23/10/16', 3) -- dd/mm/yy UK/FR
-SELECT convert(datetime, '23.10.16', 4) -- dd.mm.yy German
-SELECT convert(datetime, '23-10-16', 5) -- dd-mm-yy Italian
-SELECT convert(datetime, '23 OCT 16', 6) -- dd mon yy non-det.
-SELECT convert(datetime, 'Oct 23, 16', 7) -- mon dd, yy non-det.
-SELECT convert(datetime, '20:10:44', 8) -- hh:mm:ss
-SELECT convert(datetime, 'Oct 23 16 11:02:44:013AM', 9) -- Default with msec
-SELECT convert(datetime, '10-23-16', 10) -- mm-dd-yy U.S.
-SELECT convert(datetime, '16/10/23', 11) -- yy/mm/dd Japan
-SELECT convert(datetime, '161023', 12) -- yymmdd ISO
-SELECT convert(datetime, '23 Oct 16 11:02:07:577', 13) -- dd mon yy hh:mm:ss:mmm EU dflt
-SELECT convert(datetime, '20:10:25:300', 14) -- hh:mm:ss:mmm(24h)
-SELECT convert(datetime, '2016-10-23 20:44:11',20) -- yyyy-mm-dd hh:mm:ss(24h) ODBC can.
-SELECT convert(datetime, '2016-10-23 20:44:11.500', 21)-- yyyy-mm-dd hh:mm:ss.mmm ODBC
-------------
-
 -- SQL Datetime Data Type: Combine date & time string into datetime - sql hh mm ss
 -- String to datetime - mssql datetime - sql convert date - sql concatenate string
 DECLARE @DateTimeValue varchar(32), @DateValue char(8), @TimeValue char(6)
@@ -96,8 +20,7 @@ DateTimeOutput = @DateTimeValue;
 DateInput   TimeInput   DateTimeOutput
 20120718    211920      2012/07/18 21:19:20 */
 
- 
- 
+
 /* DATETIME 8 bytes internal storage structure
    o 1st 4 bytes: number of days after the base date 1900-01-01
    o 2nd 4 bytes: number of clock-ticks (3.33 milliseconds) since midnight
@@ -110,7 +33,7 @@ DateInput   TimeInput   DateTimeOutput
    o 2nd 2 bytes: number of minutes since midnight   */       
 
 SELECT CONVERT(binary(8), getdate()) -- 0x00009E4D 00C01272
-SELECT CONVERT(binary(4), convert(smalldatetime,getdate())) -- 0x9E4D 02BC
+SELECT CONVERT(binary(4), convert(smalldatetime, getdate())) -- 0x9E4D 02BC
 
 -- This is how a datetime looks in 8 bytes
 DECLARE @dtHex binary(8)= 0x00009966002d3344;
@@ -157,19 +80,16 @@ SELECT  DateAndTime       = @Now      -- Date portion and Time portion
        ,[Date]            = CONVERT(DATE, @Now)  -- SQL Server 2008 and on - date part
        ,Midnight1         = dateadd(day, datediff(day,0, @Now), 0)
        ,Midnight2         = CONVERT(DATETIME,CONVERT(int, @Now))
-       ,Midnight3         = CONVERT(DATETIME,CONVERT(BIGINT,@Now) &                                                           (POWER(Convert(bigint,2),32)-1))
+       ,Midnight3         = CONVERT(DATETIME,CONVERT(BIGINT,@Now) & (POWER(Convert(bigint,2),32)-1))
 /* DateAndTime    DateString  Date  Midnight1   Midnight2   Midnight3
 2010-11-02 08:00:33.657 20101102    2010-11-02  2010-11-02 00:00:00.000 2010-11-02 00:00:00.000      2010-11-02 00:00:00.000 */
 ------------
 
 -- SQL Server 2008 convert datetime to date - sql yyyy mm dd
-SELECT      TOP (3)  OrderDate = CONVERT(date, OrderDate),
-            Today = CONVERT(date, getdate())
+SELECT TOP (3) OrderDate = CONVERT(date, OrderDate), Today = CONVERT(date, getdate())
 FROM AdventureWorks2008.Sales.SalesOrderHeader
 ORDER BY newid();
-/*          OrderDate   Today
-            2004-02-15  2012-06-18 .....*/
-------------
+-- 2004-02-15  2012-06-18 
 
 -- SQL date yyyy mm dd - sqlserver yyyy mm dd - date format yyyymmdd
 SELECT CONVERT(VARCHAR(10), GETDATE(), 111) AS [YYYY/MM/DD]
@@ -188,7 +108,7 @@ SELECT UPPER(REPLACE(CONVERT(VARCHAR,GETDATE(),6),' ','-'))
 -- SQL convert date string to datetime - time set to 00:00:00.000 or 12:00AM
 PRINT CONVERT(datetime,'07-10-2012',110)        -- Jul 10 2012 12:00AM
 PRINT CONVERT(datetime,'2012/07/10',111)        -- Jul 10 2012 12:00AM
-PRINT CONVERT(datetime,'20120710',  112)        -- Jul 10 2012 12:00AM          
+PRINT CONVERT(datetime,'20120710',  112)        -- Jul 10 2012 12:00AM
 ------------
 -- UNIX to SQL Server datetime conversion      
 declare @UNIX bigint  = 1477216861;
@@ -539,7 +459,6 @@ SELECT CONVERT(smalldatetime, '2110-01-01')
 The conversion of a varchar data type to a smalldatetime data type
 resulted in an out-of-range value. */
 ************/
-Technical Job Search: CLICK HERE FOR HIGH PAID JOBS!
 
 ------------
 -- SQL CONVERT DATE/DATETIME script applying table variable
@@ -723,11 +642,3 @@ FROM  CTE ORDER BY MonthNo
       2           February
       3           March  ... */
 ------------
-
-Related articles: 
-
-The ultimate guide to the datetime datatypes
-
-CAST and CONVERT (Transact-SQL)
-
-CAST and CONVERT
