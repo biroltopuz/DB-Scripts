@@ -5,7 +5,7 @@ CHECKPOINT
 DBCC FREEPROCCACHE (plan_handle_id_/*Here you should write the plan_handle value of your query*/);
 
 -- Causes stored procedures, triggers, and user-defined functions to be recompiled the next time that they're run.
-EXEC sp_recompile N'Sales.Customer';
+EXEC sp_recompile N'[Your_Schema]';
 
 -- Execution plan cache lists
 SELECT [qs].[last_execution_time], [qs].[execution_count]
