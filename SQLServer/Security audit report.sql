@@ -1,35 +1,3 @@
-/*
-Security Audit Report
-1) List all access provisioned to a sql user or windows user/group directly 
-2) List all access provisioned to a sql user or windows user/group through a database or application role
-3) List all access provisioned to the public role
-
-Columns Returned:
-UserName        : SQL or Windows/Active Directory user cccount.  This could also be an Active Directory group.
-UserType        : Value will be either 'SQL User' or 'Windows User'.  This reflects the type of user defined for the 
-                  SQL Server user account.
-DatabaseUserName: Name of the associated user as defined in the database user account.  The database user may not be the
-                  same as the server user.
-Role            : The role name.  This will be null if the associated permissions to the object are defined at directly
-                  on the user account, otherwise this will be the name of the role that the user is a member of.
-PermissionType  : Type of permissions the user/role has on an object. Examples could include CONNECT, EXECUTE, SELECT
-                  DELETE, INSERT, ALTER, CONTROL, TAKE OWNERSHIP, VIEW DEFINITION, etc.
-                  This value may not be populated for all roles.  Some built in roles have implicit permission
-                  definitions.
-PermissionState : Reflects the state of the permission type, examples could include GRANT, DENY, etc.
-                  This value may not be populated for all roles.  Some built in roles have implicit permission
-                  definitions.
-ObjectType      : Type of object the user/role is assigned permissions on.  Examples could include USER_TABLE, 
-                  SQL_SCALAR_FUNCTION, SQL_INLINE_TABLE_VALUED_FUNCTION, SQL_STORED_PROCEDURE, VIEW, etc.   
-                  This value may not be populated for all roles.  Some built in roles have implicit permission
-                  definitions.          
-ObjectName      : Name of the object that the user/role is assigned permissions on.  
-                  This value may not be populated for all roles.  Some built in roles have implicit permission
-                  definitions.
-ColumnName      : Name of the column of the object that the user/role is assigned permissions on. This value
-                  is only populated if the object is a table, view or a table value function.                 
-*/
-
 --List all access provisioned to a sql user or windows user/group directly 
 SELECT (CASE princ.[type] WHEN 'S' THEN princ.[name] WHEN 'U' THEN ulogin.[name] COLLATE Latin1_General_CI_AI END) AS [UserName],
 (CASE princ.[type] WHEN 'S' THEN 'SQL User' WHEN 'U' THEN 'Windows User' END) AS [UserType], 
@@ -67,3 +35,19 @@ LEFT JOIN sys.columns col on col.[object_id] = perm.major_id AND col.[column_id]
 JOIN sys.objects obj ON obj.[object_id] = perm.[major_id]
 WHERE roleprinc.[type] = 'R' AND roleprinc.[name] = 'public' AND obj.is_ms_shipped = 0
 ORDER BY princ.[Name], OBJECT_NAME(perm.major_id), col.[name], perm.[permission_name], perm.[state_desc], obj.type_desc
+
+
+-- user-based permission list as executable script
+SELECT (
+    dp.state_desc + ' ' +
+    dp.permission_name collate latin1_general_cs_as + 
+    ' ON ' + '[' + s.name + ']' + '.' + '[' + o.name + ']' +
+    ' TO ' + '[' + dpr.name + ']'
+) AS GRANT_STMT
+FROM sys.database_permissions AS dp
+INNER JOIN sys.objects AS o ON dp.major_id=o.object_id
+INNER JOIN sys.schemas AS s ON o.schema_id = s.schema_id
+INNER JOIN sys.database_principals AS dpr ON dp.grantee_principal_id=dpr.principal_id
+WHERE dpr.name NOT IN ('public', 'guest')
+    -- AND o.name IN ('My_Procedure')
+    -- AND dp.permission_name='EXECUTE'
