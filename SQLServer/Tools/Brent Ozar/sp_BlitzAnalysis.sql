@@ -37,7 +37,7 @@ AS
 SET NOCOUNT ON;
 SET STATISTICS XML OFF;
 
-SELECT @Version = '8.17', @VersionDate = '20231010';
+SELECT @Version = '8.19', @VersionDate = '20240222';
 
 IF(@VersionCheckMode = 1)
 BEGIN
