@@ -267,8 +267,6 @@ ORDER BY MonthStart
 2000-02-01
 2000-03-01 ....*/
  
-Technical Job Search: CLICK HERE FOR HIGH PAID JOBS!
-
 ------------
 -- Selected named date styles
 ------------
