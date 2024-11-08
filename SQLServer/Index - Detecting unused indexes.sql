@@ -1,5 +1,6 @@
 SELECT o.name AS ObjectName, i.name AS IndexName, i.index_id AS IndexID, dm_ius.user_seeks AS UserSeek,
 dm_ius.user_scans AS UserScans, dm_ius.user_lookups AS UserLookups, dm_ius.user_updates AS UserUpdates, p.TableRows,
+i.type_desc, last_user_seek, last_user_scan, STATS_DATE(i.object_id, i.index_id) as StatsUpdated,
 'DROP INDEX ' + QUOTENAME(i.name) + ' ON ' + QUOTENAME(s.name) + '.' + QUOTENAME(OBJECT_NAME(dm_ius.object_id)) AS 'drop statement'
 FROM sys.dm_db_index_usage_stats dm_ius
 INNER JOIN sys.indexes i ON i.index_id = dm_ius.index_id AND dm_ius.object_id = i.object_id
