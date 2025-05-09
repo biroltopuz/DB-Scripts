@@ -38,7 +38,7 @@ AS
 	SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
 	
 
-	SELECT @Version = '8.19', @VersionDate = '20240222';
+	SELECT @Version = '8.24', @VersionDate = '20250407';
 	SET @OutputType = UPPER(@OutputType);
 
     IF(@VersionCheckMode = 1)
@@ -155,6 +155,7 @@ AS
 			,@MinServerMemory bigint
 			,@MaxServerMemory bigint
 			,@ColumnStoreIndexesInUse bit
+		    ,@QueryStoreInUse bit
 			,@TraceFileIssue bit
 			-- Flag for Windows OS to help with Linux support
 			,@IsWindowsOperatingSystem BIT
@@ -286,8 +287,8 @@ AS
             (
                 SELECT
                     1/0
-                FROM fn_my_permissions(N'sys.traces', N'OBJECT') AS fmp
-                WHERE fmp.permission_name = N'ALTER'
+                FROM fn_my_permissions(NULL, NULL) AS fmp
+                WHERE fmp.permission_name = N'ALTER TRACE'
             )
             BEGIN
                 SET @SkipTrace = 1;
@@ -333,18 +334,15 @@ AS
 			    END CATCH;
 			END; /*Need execute on sp_validatelogins*/
             
-            IF ISNULL(@SkipGetAlertInfo, 0) != 1 /*If @SkipGetAlertInfo hasn't been set to 1 by the caller*/
-			BEGIN
-			    BEGIN TRY
-			        /* Try to fill the table for check 73 */
-					INSERT INTO #AlertInfo
-                    EXEC [master].[dbo].[sp_MSgetalertinfo] @includeaddresses = 0;
-			
-			    	SET @SkipGetAlertInfo = 0; /*We can execute sp_MSgetalertinfo*/
-			    END TRY
-			    BEGIN CATCH
-			    	SET @SkipGetAlertInfo = 1; /*We have don't have execute rights or sp_MSgetalertinfo throws an error so skip it*/
-			    END CATCH;
+			IF NOT EXISTS
+            (
+                SELECT
+                    1/0
+                FROM fn_my_permissions(N'[master].[dbo].[sp_MSgetalertinfo]', N'OBJECT') AS fmp
+                WHERE fmp.permission_name = N'EXECUTE'
+            )
+            BEGIN
+			    SET @SkipGetAlertInfo = 1;
 			END; /*Need execute on sp_MSgetalertinfo*/
 
 			IF ISNULL(@SkipModel, 0) != 1 /*If @SkipModel hasn't been set to 1 by the caller*/
@@ -880,6 +878,10 @@ AS
 						INSERT INTO #SkipChecks (CheckID, DatabaseName) VALUES (80, 'tempdb');  /* Max file size set */
 						INSERT INTO #SkipChecks (CheckID) VALUES (224); /* CheckID 224 - Performance - SSRS/SSAS/SSIS Installed */
 						INSERT INTO #SkipChecks (CheckID) VALUES (92); /* CheckID 92 - drive space */
+						INSERT INTO #SkipChecks (CheckID) VALUES (258);/* CheckID 258 - Security - SQL Server service is running as LocalSystem or NT AUTHORITY\SYSTEM */
+						INSERT INTO #SkipChecks (CheckID) VALUES (259);/* CheckID 259 - Security - SQL Server Agent service is running as LocalSystem or NT AUTHORITY\SYSTEM */
+						INSERT INTO #SkipChecks (CheckID) VALUES (260); /* CheckID 260 - Security - SQL Server service account is member of Administrators */
+						INSERT INTO #SkipChecks (CheckID) VALUES (261); /*CheckID 261 - Security - SQL Server Agent service account is member of Administrators */
 			            INSERT  INTO #BlitzResults
 			            ( CheckID ,
 				            Priority ,
@@ -1129,7 +1131,10 @@ AS
 		INSERT INTO #IgnorableWaits VALUES ('PARALLEL_REDO_WORKER_WAIT_WORK');
 		INSERT INTO #IgnorableWaits VALUES ('POPULATE_LOCK_ORDINALS');
 		INSERT INTO #IgnorableWaits VALUES ('PREEMPTIVE_HADR_LEASE_MECHANISM');
+		INSERT INTO #IgnorableWaits VALUES ('PREEMPTIVE_OS_FLUSHFILEBUFFERS');
 		INSERT INTO #IgnorableWaits VALUES ('PREEMPTIVE_SP_SERVER_DIAGNOSTICS');
+		INSERT INTO #IgnorableWaits VALUES ('PVS_PREALLOCATE');
+		INSERT INTO #IgnorableWaits VALUES ('PWAIT_EXTENSIBILITY_CLEANUP_TASK');
 		INSERT INTO #IgnorableWaits VALUES ('QDS_ASYNC_QUEUE');
 		INSERT INTO #IgnorableWaits VALUES ('QDS_CLEANUP_STALE_QUERIES_TASK_MAIN_LOOP_SLEEP');
 		INSERT INTO #IgnorableWaits VALUES ('QDS_PERSIST_TASK_MAIN_LOOP_SLEEP');
@@ -1143,6 +1148,7 @@ AS
 		INSERT INTO #IgnorableWaits VALUES ('SQLTRACE_BUFFER_FLUSH');
 		INSERT INTO #IgnorableWaits VALUES ('SQLTRACE_INCREMENTAL_FLUSH_SLEEP');
 		INSERT INTO #IgnorableWaits VALUES ('UCS_SESSION_REGISTRATION');
+		INSERT INTO #IgnorableWaits VALUES ('VDI_CLIENT_OTHER');
 		INSERT INTO #IgnorableWaits VALUES ('WAIT_XTP_OFFLINE_CKPT_NEW_LOG');
 		INSERT INTO #IgnorableWaits VALUES ('WAITFOR');
 		INSERT INTO #IgnorableWaits VALUES ('XE_DISPATCHER_WAIT');
@@ -1559,10 +1565,8 @@ AS
 				end of the stored proc, where we start doing things like checking
 				the plan cache, but those aren't as cleanly commented.
 
-				If you'd like to contribute your own check, use one of the check
-				formats shown above and email it to Help@BrentOzar.com. You don't
-				have to pick a CheckID or a link - we'll take care of that when we
-				test and publish the code. Thanks!
+				To contribute your own checks or fix bugs, learn more here:
+				https://github.com/BrentOzarULTD/SQL-Server-First-Responder-Kit/blob/main/CONTRIBUTING.md
 				*/
 
 				IF NOT EXISTS ( SELECT  1
@@ -1833,9 +1837,18 @@ AS
 						IF @Debug IN (1, 2) RAISERROR('Running CheckId [%d].', 0, 1, 2301) WITH NOWAIT;
 						
                         /*
-						#InvalidLogins is filled at the start during the permissions check
+						#InvalidLogins is filled at the start during the permissions check IF we are not sysadmin
+						filling it now if we are sysadmin
 						*/
-                        
+                        IF @sa = 1
+							BEGIN
+								INSERT INTO #InvalidLogins
+			    				(
+					    		[LoginSID]
+					    		,[LoginName]
+					    		)
+					    		EXEC sp_validatelogins;
+							END;
 						INSERT  INTO #BlitzResults
 								( CheckID ,
 								  Priority ,
@@ -4063,7 +4076,7 @@ AS
 											''Informational'' AS FindingGroup ,
 											''Backup Compression Default Off''  AS Finding ,
 											''https://www.brentozar.com/go/backup'' AS URL ,
-											''Uncompressed full backups have happened recently, and backup compression is not turned on at the server level. Backup compression is included with SQL Server 2008R2 & newer, even in Standard Edition. We recommend turning backup compression on by default so that ad-hoc backups will get compressed.''
+											''Uncompressed full backups have happened recently, and backup compression is not turned on at the server level. Backup compression is included with Standard Edition. We recommend turning backup compression on by default so that ad-hoc backups will get compressed.''
 											FROM sys.configurations
 											WHERE configuration_id = 1579 AND CAST(value_in_use AS INT) = 0
                                             AND EXISTS (SELECT * FROM msdb.dbo.backupset WHERE backup_size = compressed_backup_size AND type = ''D'' AND backup_finish_date >= DATEADD(DD, -14, GETDATE())) OPTION (RECOMPILE);';
@@ -4991,6 +5004,78 @@ IF @ProductVersionMajor >= 10
 						  AND [servicename] LIKE 'SQL Server Agent%'
 						  AND CAST(SERVERPROPERTY('Edition') AS VARCHAR(1000)) NOT LIKE '%xpress%';
 
+					END;
+				END;
+/* CheckID 258 - Security - SQL Server Service is running as LocalSystem or NT AUTHORITY\SYSTEM */
+IF @ProductVersionMajor >= 10 
+			   AND NOT EXISTS ( SELECT  1
+							    FROM    #SkipChecks
+							    WHERE   DatabaseName IS NULL AND CheckID = 258 )
+				BEGIN
+				IF EXISTS ( SELECT  1
+							FROM    sys.all_objects
+							WHERE   [name] = 'dm_server_services' )
+					BEGIN
+						  IF @Debug IN (1, 2) RAISERROR('Running CheckId [%d].', 0, 1, 258) WITH NOWAIT;
+						
+						  INSERT    INTO [#BlitzResults]
+									( [CheckID] ,
+									  [Priority] ,
+									  [FindingsGroup] ,
+									  [Finding] ,
+									  [URL] ,
+									  [Details] )
+
+							SELECT
+							258 AS [CheckID] ,
+							1 AS [Priority] ,
+							'Security' AS [FindingsGroup] ,
+							'Dangerous Service Account' AS [Finding] ,
+							'https://vladdba.com/SQLServerSvcAccount' AS [URL] ,
+							'SQL Server''s service account is '+ [service_account] 
+							+' - meaning that anyone who can use xp_cmdshell can do absolutely anything on the host.'  AS [Details]
+						  FROM
+							[sys].[dm_server_services]
+						  WHERE ([service_account] = 'LocalSystem'
+						    OR LOWER([service_account]) = 'nt authority\system')
+						  AND [servicename] LIKE 'SQL Server%'
+						  AND [servicename] NOT LIKE 'SQL Server Agent%';
+					END;
+				END;
+
+/* CheckID 259 - Security - SQL Server Agent Service is running as LocalSystem or NT AUTHORITY\SYSTEM */
+IF @ProductVersionMajor >= 10 
+			   AND NOT EXISTS ( SELECT  1
+							    FROM    #SkipChecks
+							    WHERE   DatabaseName IS NULL AND CheckID = 259 )
+				BEGIN
+				IF EXISTS ( SELECT  1
+							FROM    sys.all_objects
+							WHERE   [name] = 'dm_server_services' )
+					BEGIN
+						  IF @Debug IN (1, 2) RAISERROR('Running CheckId [%d].', 0, 1, 259) WITH NOWAIT;
+						
+						  INSERT    INTO [#BlitzResults]
+									( [CheckID] ,
+									  [Priority] ,
+									  [FindingsGroup] ,
+									  [Finding] ,
+									  [URL] ,
+									  [Details] )
+
+							SELECT
+							259 AS [CheckID] ,
+							1 AS [Priority] ,
+							'Security' AS [FindingsGroup] ,
+							'Dangerous Service Account' AS [Finding] ,
+							'https://vladdba.com/SQLServerSvcAccount' AS [URL] ,
+							'SQL Server Agent''s service account is '+ [service_account] 
+							+' - meaning that anyone who can create and run jobs can do absolutely anything on the host.'  AS [Details]
+						  FROM
+							[sys].[dm_server_services]
+						  WHERE ([service_account] = 'LocalSystem'
+						    OR LOWER([service_account]) = 'nt authority\system')
+						  AND [servicename] LIKE 'SQL Server Agent%';
 					END;
 				END;
 
@@ -6020,6 +6105,8 @@ IF @ProductVersionMajor >= 10
 										FROM    #SkipChecks
 										WHERE   DatabaseName IS NULL AND CheckID = 191 )
 			AND (SELECT COUNT(*) FROM sys.master_files WHERE database_id = 2) <> (SELECT COUNT(*) FROM tempdb.sys.database_files)
+			/* User may have no permissions to see tempdb files in sys.master_files. In that case count returned will be 0 and we want to skip the check */
+			AND (SELECT COUNT(*) FROM sys.master_files WHERE database_id = 2) <> 0
 				BEGIN
 					
 					IF @Debug IN (1, 2) RAISERROR('Running CheckId [%d].', 0, 1, 191) WITH NOWAIT
@@ -6684,6 +6771,134 @@ IF @ProductVersionMajor >= 10
 									  AND N''?'' NOT IN (''master'', ''model'', ''msdb'', ''tempdb'', ''DWConfiguration'', ''DWDiagnostics'', ''DWQueue'', ''ReportServer'', ''ReportServerTempDB'') OPTION (RECOMPILE)';
 							END;
 
+						IF NOT EXISTS ( SELECT  1
+										FROM    #SkipChecks
+										WHERE   DatabaseName IS NULL AND CheckID = 262 )
+                            AND EXISTS(SELECT * FROM sys.all_objects WHERE name = 'database_query_store_options')
+							AND  @ProductVersionMajor > 13 /* The relevant column only exists in 2017+ */
+							BEGIN
+
+								IF @Debug IN (1, 2) RAISERROR('Running CheckId [%d].', 0, 1, 262) WITH NOWAIT;
+
+								EXEC dbo.sp_MSforeachdb 'USE [?];
+                                        SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+			                            INSERT INTO #BlitzResults
+			                            (CheckID,
+			                            DatabaseName,
+			                            Priority,
+			                            FindingsGroup,
+			                            Finding,
+			                            URL,
+			                            Details)
+		                              SELECT TOP 1 262,
+		                              N''?'',
+		                              200,
+		                              ''Performance'',
+		                              ''Query Store Wait Stats Disabled'',
+		                              ''https://www.sqlskills.com/blogs/erin/query-store-settings/'',
+		                              (''The new SQL Server 2017 Query Store feature for tracking wait stats has not been enabled on this database. It is very useful for tracking wait stats at a query level.'')
+		                              FROM [?].sys.database_query_store_options
+									  WHERE desired_state <> 0
+									  AND wait_stats_capture_mode = 0
+									  OPTION (RECOMPILE)';
+							END;
+                    
+						IF NOT EXISTS ( SELECT  1
+										FROM    #SkipChecks
+										WHERE   DatabaseName IS NULL AND CheckID = 263 )
+                            AND EXISTS(SELECT * FROM sys.all_objects WHERE name = 'database_query_store_options')
+							BEGIN
+              
+								IF @Debug IN (1, 2) RAISERROR('Running CheckId [%d].', 0, 1, 263) WITH NOWAIT;
+
+								EXEC dbo.sp_MSforeachdb 'USE [?];
+                                        SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+			                            INSERT INTO #BlitzResults
+			                            (CheckID,
+			                            DatabaseName,
+			                            Priority,
+			                            FindingsGroup,
+			                            Finding,
+			                            URL,
+			                            Details)
+		                              SELECT TOP 1 263,
+		                              N''?'',
+		                              200,
+		                              ''Performance'',
+		                              ''Query Store Effectively Disabled'',
+		                              ''https://learn.microsoft.com/en-us/sql/relational-databases/performance/best-practice-with-the-query-store#Verify'',
+		                              (''Query Store is not in a state where it is writing, so it is effectively disabled. Check your Query Store settings.'')
+		                              FROM [?].sys.database_query_store_options
+									  WHERE desired_state <> 0
+									  AND actual_state <> 2
+									  OPTION (RECOMPILE)';
+							END;
+
+						IF NOT EXISTS ( SELECT  1
+										FROM    #SkipChecks
+										WHERE   DatabaseName IS NULL AND CheckID = 264 )
+                            AND EXISTS(SELECT * FROM sys.all_objects WHERE name = 'database_query_store_options')
+							BEGIN
+
+								IF @Debug IN (1, 2) RAISERROR('Running CheckId [%d].', 0, 1, 264) WITH NOWAIT;
+
+								EXEC dbo.sp_MSforeachdb 'USE [?];
+                                        SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+			                            INSERT INTO #BlitzResults
+			                            (CheckID,
+			                            DatabaseName,
+			                            Priority,
+			                            FindingsGroup,
+			                            Finding,
+			                            URL,
+			                            Details)
+		                              SELECT TOP 1 264,
+		                              N''?'',
+		                              200,
+		                              ''Performance'',
+		                              ''Undesired Query Store State'',
+		                              ''https://learn.microsoft.com/en-us/sql/relational-databases/performance/best-practice-with-the-query-store#Verify'',
+		                              (''You have asked for Query Store to be in '' + desired_state_desc + '' mode, but it is in '' + actual_state_desc + '' mode.'')
+		                              FROM [?].sys.database_query_store_options
+									  WHERE desired_state <> 0
+									  AND desired_state <> actual_state 
+									  OPTION (RECOMPILE)';
+							END;
+
+						IF NOT EXISTS ( SELECT  1
+										FROM    #SkipChecks
+										WHERE   DatabaseName IS NULL AND CheckID = 265 )
+  			                AND EXISTS(SELECT * FROM sys.all_objects WHERE name = 'database_query_store_options')
+							BEGIN
+								IF @Debug IN (1, 2) RAISERROR('Running CheckId [%d].', 0, 1, 265) WITH NOWAIT;
+
+								EXEC dbo.sp_MSforeachdb 'USE [?];
+                                        SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+			                            INSERT INTO #BlitzResults
+			                            (CheckID,
+			                            DatabaseName,
+			                            Priority,
+			                            FindingsGroup,
+			                            Finding,
+			                            URL,
+			                            Details)
+		                              SELECT TOP 1 265,
+		                              N''?'',
+		                              200,
+		                              ''Performance'',
+		                              ''Query Store Unusually Configured'',
+		                              ''https://www.sqlskills.com/blogs/erin/query-store-best-practices/'',
+		                              (''The '' + query_capture_mode_desc + '' query capture mode '' +
+											CASE query_capture_mode_desc
+												WHEN ''ALL'' THEN ''captures more data than you will probably use. If your workload is heavily ad-hoc, then it can also cause Query Store to capture so much that it turns itself off.''
+												WHEN ''NONE'' THEN ''stops Query Store capturing data for new queries.''
+												WHEN ''CUSTOM'' THEN ''suggests that somebody has gone out of their way to only capture exactly what they want.''
+											ELSE ''is not documented.'' END)
+		                              FROM [?].sys.database_query_store_options
+									  WHERE desired_state <> 0 /* No point in checking this if Query Store is off. */
+									  AND query_capture_mode_desc <> ''AUTO''
+									  OPTION (RECOMPILE)';
+							END;
 						
 						IF @ProductVersionMajor = 13 AND @ProductVersionMinor < 2149 --2016 CU1 has the fix in it
 							AND NOT EXISTS ( SELECT  1
@@ -6834,7 +7049,7 @@ IF @ProductVersionMajor >= 10
 		                                ''File Configuration'' AS FindingsGroup,
 		                                ''File growth set to percent'',
 		                                ''https://www.brentozar.com/go/percentgrowth'' AS URL,
-		                                ''The ['' + DB_NAME() + ''] database file '' + f.physical_name + '' has grown to '' + CONVERT(NVARCHAR(10), CONVERT(NUMERIC(38, 2), (f.size / 128.) / 1024.)) + '' GB, and is using percent filegrowth settings. This can lead to slow performance during growths if Instant File Initialization is not enabled.''
+		                                ''The ['' + DB_NAME() + ''] database file '' + f.physical_name + '' has grown to '' + CONVERT(NVARCHAR(20), CONVERT(NUMERIC(38, 2), (f.size / 128.) / 1024.)) + '' GB, and is using percent filegrowth settings. This can lead to slow performance during growths if Instant File Initialization is not enabled.''
 		                                FROM    [?].sys.database_files f
 		                                WHERE   is_percent_growth = 1 and size > 128000  OPTION (RECOMPILE);';
 					            END;
@@ -7513,6 +7728,20 @@ IF @ProductVersionMajor >= 10
 								IF EXISTS (SELECT * FROM #TemporaryDatabaseResults) SET @ColumnStoreIndexesInUse = 1;
 					        END;
 
+						/* Check if Query Store is in use - for Github issue #3527 */
+				        IF NOT EXISTS ( SELECT  1
+								        FROM    #SkipChecks
+								        WHERE   DatabaseName IS NULL AND CheckID = 74 ) /* Trace flags */
+							AND  @ProductVersionMajor > 12 /* The relevant column only exists in versions that support Query store */
+					        BEGIN
+								TRUNCATE TABLE #TemporaryDatabaseResults;
+						
+								IF @Debug IN (1, 2) RAISERROR('Running CheckId [%d].', 0, 1, 74) WITH NOWAIT;
+								
+								EXEC dbo.sp_MSforeachdb 'USE [?]; SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED; IF EXISTS(SELECT * FROM sys.databases WHERE is_query_store_on = 1) INSERT INTO #TemporaryDatabaseResults (DatabaseName, Finding) VALUES (DB_NAME(), ''Yup'') OPTION (RECOMPILE);';
+								IF EXISTS (SELECT * FROM #TemporaryDatabaseResults) SET @QueryStoreInUse = 1;
+					        END;
+
 						/* Non-Default Database Scoped Config - Github issue #598 */
 				        IF EXISTS ( SELECT * FROM sys.all_objects WHERE [name] = 'database_scoped_configurations' )
 					        BEGIN
@@ -7520,52 +7749,44 @@ IF @ProductVersionMajor >= 10
 								IF @Debug IN (1, 2) RAISERROR('Running CheckId [%d] through [%d] and [%d] through [%d].', 0, 1, 194, 197, 237, 255) WITH NOWAIT;
 								
 								INSERT INTO #DatabaseScopedConfigurationDefaults (configuration_id, [name], default_value, default_value_for_secondary, CheckID)
-									SELECT 1, 'MAXDOP', '0', NULL, 194
-									UNION ALL
-									SELECT 2, 'LEGACY_CARDINALITY_ESTIMATION', '0', NULL, 195
-									UNION ALL
-									SELECT 3, 'PARAMETER_SNIFFING', '1', NULL, 196
-									UNION ALL
-									SELECT 4, 'QUERY_OPTIMIZER_HOTFIXES', '0', NULL, 197
-									UNION ALL
-									SELECT 6, 'IDENTITY_CACHE', '1', NULL, 237
-									UNION ALL
-									SELECT 7, 'INTERLEAVED_EXECUTION_TVF', '1', NULL, 238
-									UNION ALL
-									SELECT 8, 'BATCH_MODE_MEMORY_GRANT_FEEDBACK', '1', NULL, 239
-									UNION ALL
-									SELECT 9, 'BATCH_MODE_ADAPTIVE_JOINS', '1', NULL, 240
-									UNION ALL
-									SELECT 10, 'TSQL_SCALAR_UDF_INLINING', '1', NULL, 241
-									UNION ALL
-									SELECT 11, 'ELEVATE_ONLINE', 'OFF', NULL, 242
-									UNION ALL
-									SELECT 12, 'ELEVATE_RESUMABLE', 'OFF', NULL, 243
-									UNION ALL
-									SELECT 13, 'OPTIMIZE_FOR_AD_HOC_WORKLOADS', '0', NULL, 244
-									UNION ALL
-									SELECT 14, 'XTP_PROCEDURE_EXECUTION_STATISTICS', '0', NULL, 245
-									UNION ALL
-									SELECT 15, 'XTP_QUERY_EXECUTION_STATISTICS', '0', NULL, 246
-									UNION ALL
-									SELECT 16, 'ROW_MODE_MEMORY_GRANT_FEEDBACK', '1', NULL, 247
-									UNION ALL
-									SELECT 17, 'ISOLATE_SECURITY_POLICY_CARDINALITY', '0', NULL, 248
-									UNION ALL
-									SELECT 18, 'BATCH_MODE_ON_ROWSTORE', '1', NULL, 249
-									UNION ALL
-									SELECT 19, 'DEFERRED_COMPILATION_TV', '1', NULL, 250
-									UNION ALL
-									SELECT 20, 'ACCELERATED_PLAN_FORCING', '1', NULL, 251
-									UNION ALL
-									SELECT 21, 'GLOBAL_TEMPORARY_TABLE_AUTO_DROP', '1', NULL, 252
-									UNION ALL
-									SELECT 22, 'LIGHTWEIGHT_QUERY_PROFILING', '1', NULL, 253
-									UNION ALL
-									SELECT 23, 'VERBOSE_TRUNCATION_WARNINGS', '1', NULL, 254
-									UNION ALL
-									SELECT 24, 'LAST_QUERY_PLAN_STATS', '0', NULL, 255;
-						        EXEC dbo.sp_MSforeachdb 'USE [?]; SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED; INSERT INTO #BlitzResults (CheckID, DatabaseName, Priority, FindingsGroup, Finding, URL, Details)
+								VALUES
+									(1, 'MAXDOP', '0', NULL, 194),
+									(2, 'LEGACY_CARDINALITY_ESTIMATION', '0', NULL, 195),
+									(3, 'PARAMETER_SNIFFING', '1', NULL, 196),
+									(4, 'QUERY_OPTIMIZER_HOTFIXES', '0', NULL, 197),
+									(6, 'IDENTITY_CACHE', '1', NULL, 237),
+									(7, 'INTERLEAVED_EXECUTION_TVF', '1', NULL, 238),
+									(8, 'BATCH_MODE_MEMORY_GRANT_FEEDBACK', '1', NULL, 239),
+									(9, 'BATCH_MODE_ADAPTIVE_JOINS', '1', NULL, 240),
+									(10, 'TSQL_SCALAR_UDF_INLINING', '1', NULL, 241),
+									(11, 'ELEVATE_ONLINE', 'OFF', NULL, 242),
+									(12, 'ELEVATE_RESUMABLE', 'OFF', NULL, 243),
+									(13, 'OPTIMIZE_FOR_AD_HOC_WORKLOADS', '0', NULL, 244),
+									(14, 'XTP_PROCEDURE_EXECUTION_STATISTICS', '0', NULL, 245),
+									(15, 'XTP_QUERY_EXECUTION_STATISTICS', '0', NULL, 246),
+									(16, 'ROW_MODE_MEMORY_GRANT_FEEDBACK', '1', NULL, 247),
+									(17, 'ISOLATE_SECURITY_POLICY_CARDINALITY', '0', NULL, 248),
+									(18, 'BATCH_MODE_ON_ROWSTORE', '1', NULL, 249),
+									(19, 'DEFERRED_COMPILATION_TV', '1', NULL, 250),
+									(20, 'ACCELERATED_PLAN_FORCING', '1', NULL, 251),
+									(21, 'GLOBAL_TEMPORARY_TABLE_AUTO_DROP', '1', NULL, 252),
+									(22, 'LIGHTWEIGHT_QUERY_PROFILING', '1', NULL, 253),
+									(23, 'VERBOSE_TRUNCATION_WARNINGS', '1', NULL, 254),
+									(24, 'LAST_QUERY_PLAN_STATS', '0', NULL, 255),
+									(25, 'PAUSED_RESUMABLE_INDEX_ABORT_DURATION_MINUTES', '1440', NULL, 267),
+									(26, 'DW_COMPATIBILITY_LEVEL', '0', NULL, 267),
+									(27, 'EXEC_QUERY_STATS_FOR_SCALAR_FUNCTIONS', '1', NULL, 267),
+									(28, 'PARAMETER_SENSITIVE_PLAN_OPTIMIZATION', '1', NULL, 267),
+									(29, 'ASYNC_STATS_UPDATE_WAIT_AT_LOW_PRIORITY', '0', NULL, 267),
+									(31, 'CE_FEEDBACK', '1', NULL, 267),
+									(33, 'MEMORY_GRANT_FEEDBACK_PERSISTENCE', '1', NULL, 267),
+									(34, 'MEMORY_GRANT_FEEDBACK_PERCENTILE_GRANT', '1', NULL, 267),
+									(35, 'OPTIMIZED_PLAN_FORCING', '1', NULL, 267),
+									(37, 'DOP_FEEDBACK', '0', NULL, 267),
+									(38, 'LEDGER_DIGEST_STORAGE_ENDPOINT', 'OFF', NULL, 267),
+									(39, 'FORCE_SHOWPLAN_RUNTIME_PARAMETER_COLLECTION', '0', NULL, 267);
+
+EXEC dbo.sp_MSforeachdb 'USE [?]; SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED; INSERT INTO #BlitzResults (CheckID, DatabaseName, Priority, FindingsGroup, Finding, URL, Details)
 									SELECT def1.CheckID, DB_NAME(), 210, ''Non-Default Database Scoped Config'', dsc.[name], ''https://www.brentozar.com/go/dbscope'', (''Set value: '' + COALESCE(CAST(dsc.value AS NVARCHAR(100)),''Empty'') + '' Default: '' + COALESCE(CAST(def1.default_value AS NVARCHAR(100)),''Empty'') + '' Set value for secondary: '' + COALESCE(CAST(dsc.value_for_secondary AS NVARCHAR(100)),''Empty'') + '' Default value for secondary: '' + COALESCE(CAST(def1.default_value_for_secondary AS NVARCHAR(100)),''Empty''))
 									FROM [?].sys.database_scoped_configurations dsc
 									INNER JOIN #DatabaseScopedConfigurationDefaults def1 ON dsc.configuration_id = def1.configuration_id
@@ -8237,6 +8458,9 @@ IF @ProductVersionMajor >= 10
 					BEGIN
 
 						IF @Debug IN (1, 2) RAISERROR('Running CheckId [%d].', 0, 1, 73) WITH NOWAIT;
+
+						INSERT INTO #AlertInfo
+						EXEC [master].[dbo].[sp_MSgetalertinfo] @includeaddresses = 0;
 						
 						INSERT  INTO #BlitzResults
 								( CheckID ,
@@ -8280,6 +8504,7 @@ IF @ProductVersionMajor >= 10
 										'Informational' AS FindingsGroup ,
 										'Trace Flag On' AS Finding ,
 										CASE WHEN [T].[TraceFlag] = '834'  AND @ColumnStoreIndexesInUse = 1 THEN 'https://support.microsoft.com/en-us/kb/3210239'
+											 WHEN [T].[TraceFlag] IN ('7745', '7752') THEN 'https://www.sqlskills.com/blogs/erin/query-store-trace-flags/'
 											 ELSE'https://www.BrentOzar.com/go/traceflags/' END AS URL ,
 										'Trace flag ' +
 										CASE WHEN [T].[TraceFlag] = '652'  THEN '652 enabled globally, which disables pre-fetching during index scans. This is usually a very bad idea.'
@@ -8298,6 +8523,13 @@ IF @ProductVersionMajor >= 10
 											 WHEN [T].[TraceFlag] = '3226' THEN '3226 enabled globally, which keeps the event log clean by not reporting successful backups.'
 											 WHEN [T].[TraceFlag] = '3505' THEN '3505 enabled globally, which disables Checkpoints. This is usually a very bad idea.'
 											 WHEN [T].[TraceFlag] = '4199' THEN '4199 enabled globally, which enables non-default Query Optimizer fixes, changing query plans from the default behaviors.'
+											 WHEN [T].[TraceFlag] = '7745' AND @QueryStoreInUse = 1 THEN '7745 enabled globally, which makes shutdowns/failovers quicker by not waiting for Query Store to flush to disk. This good idea loses you the non-flushed Query Store data.'
+											 WHEN [T].[TraceFlag] = '7745' AND  @ProductVersionMajor > 12 THEN '7745 enabled globally, which is for Query Store. None of your databases have Query Store enabled, so why do you have this turned on?'
+											 WHEN [T].[TraceFlag] = '7745' AND  @ProductVersionMajor <= 12 THEN '7745 enabled globally, which is for Query Store. Query Store does not exist on your SQL Server version, so why do you have this turned on?'
+											 WHEN [T].[TraceFlag] = '7752' AND  @ProductVersionMajor > 14 THEN '7752 enabled globally, which is for Query Store. However, it has no effect in your SQL Server version. Consider turning it off.'
+											 WHEN [T].[TraceFlag] = '7752' AND @QueryStoreInUse = 1 THEN '7752 enabled globally, which stops queries needing to wait on Query Store loading up after database recovery.'
+											 WHEN [T].[TraceFlag] = '7752' AND  @ProductVersionMajor > 12 THEN '7752 enabled globally, which is for Query Store. None of your databases have Query Store enabled, so why do you have this turned on?'
+											 WHEN [T].[TraceFlag] = '7752' AND  @ProductVersionMajor <= 12 THEN '7752 enabled globally, which is for Query Store. Query Store does not exist on your SQL Server version, so why do you have this turned on?'
 											 WHEN [T].[TraceFlag] = '8048' THEN '8048 enabled globally, which tries to reduce CMEMTHREAD waits on servers with a lot of logical processors.'
 											 WHEN [T].[TraceFlag] = '8017' AND (CAST(SERVERPROPERTY('Edition') AS NVARCHAR(1000)) LIKE N'%Express%') THEN '8017 is enabled globally, but this is the default for Express Edition.'
                                              WHEN [T].[TraceFlag] = '8017' AND (CAST(SERVERPROPERTY('Edition') AS NVARCHAR(1000)) NOT LIKE N'%Express%') THEN '8017 is enabled globally, which disables the creation of schedulers for all logical processors.'
@@ -8305,6 +8537,54 @@ IF @ProductVersionMajor >= 10
 											 ELSE [T].[TraceFlag] + ' is enabled globally.' END
 										AS Details
 								FROM    #TraceStatus T;
+
+
+						IF NOT EXISTS ( SELECT  1
+										FROM    #TraceStatus T
+										WHERE   [T].[TraceFlag] = '7745' )
+							AND @QueryStoreInUse = 1
+
+							BEGIN
+								INSERT  INTO #BlitzResults
+										( CheckID ,
+										  Priority ,
+										  FindingsGroup ,
+										  Finding ,
+										  URL ,
+										  Details
+										)
+										SELECT  74 AS CheckID ,
+												200 AS Priority ,
+												'Informational' AS FindingsGroup ,
+												'Recommended Trace Flag Off' AS Finding ,
+												'https://www.sqlskills.com/blogs/erin/query-store-trace-flags/' AS URL ,
+												'Trace Flag 7745 not enabled globally. It makes shutdowns/failovers quicker by not waiting for Query Store to flush to disk. It is recommended, but it loses you the non-flushed Query Store data.' AS Details				
+										FROM    #TraceStatus T
+							END;
+
+						IF NOT EXISTS ( SELECT  1
+										FROM    #TraceStatus T
+										WHERE   [T].[TraceFlag] = '7752' )
+							AND @ProductVersionMajor < 15
+							AND @QueryStoreInUse = 1
+
+							BEGIN
+								INSERT  INTO #BlitzResults
+										( CheckID ,
+										  Priority ,
+										  FindingsGroup ,
+										  Finding ,
+										  URL ,
+										  Details
+										)
+										SELECT  74 AS CheckID ,
+												200 AS Priority ,
+												'Informational' AS FindingsGroup ,
+												'Recommended Trace Flag Off' AS Finding ,
+												'https://www.sqlskills.com/blogs/erin/query-store-trace-flags/' AS URL ,
+												'Trace Flag 7752 not enabled globally. It stops queries needing to wait on Query Store loading up after database recovery. It is so recommended that it is enabled by default as of SQL Server 2019.' AS Details						
+										FROM    #TraceStatus T
+							END;
 					END;
 
             /* High CMEMTHREAD waits that could need trace flag 8048.
@@ -8329,7 +8609,7 @@ IF @ProductVersionMajor >= 10
 							SELECT  162 AS CheckID ,
 									50 AS Priority ,
 									'Performance' AS FindingGroup ,
-									'Poison Wait Detected: CMEMTHREAD & NUMA'  AS Finding ,
+									'Poison Wait Detected: CMEMTHREAD and NUMA'  AS Finding ,
 									'https://www.brentozar.com/go/poison' AS URL ,
                                     CONVERT(VARCHAR(10), (MAX([wait_time_ms]) / 1000) / 86400) + ':' + CONVERT(VARCHAR(20), DATEADD(s, (MAX([wait_time_ms]) / 1000), 0), 108) + ' of this wait have been recorded'
                                     + CASE WHEN ts.status = 1 THEN ' despite enabling trace flag 8048 already.'
@@ -9556,6 +9836,160 @@ IF @ProductVersionMajor >= 10 AND  NOT EXISTS ( SELECT  1
 										WHERE database_id > 4;
 
                             END;
+
+                        /* CheckID 260 - Security - SQL Server service account is member of Administrators */
+						IF NOT EXISTS ( SELECT  1
+										FROM    #SkipChecks
+										WHERE   DatabaseName IS NULL AND CheckID = 260 ) AND @ProductVersionMajor >= 10 
+							BEGIN
+                                
+								IF (SELECT value_in_use FROM  sys.configurations WHERE [name] = 'xp_cmdshell') = 1
+								AND EXISTS ( SELECT  1 FROM    sys.all_objects	WHERE   [name] = 'dm_server_services' )
+                                BEGIN
+								    IF @Debug IN (1, 2) RAISERROR('Running CheckId [%d].', 0, 1, 260) WITH NOWAIT;
+                                    IF OBJECT_ID('tempdb..#localadmins') IS NOT NULL DROP TABLE #localadmins;
+                                    CREATE TABLE #localadmins (cmdshell_output NVARCHAR(1000));
+                                    
+                                    INSERT INTO #localadmins
+                                    EXEC /**/xp_cmdshell/**/ N'net localgroup administrators' /* added comments around command since some firewalls block this string TL 20210221 */
+                                    
+                                    IF EXISTS (SELECT 1 
+                                                FROM #localadmins 
+                                                WHERE LOWER(cmdshell_output) = ( SELECT LOWER([service_account])
+												                                 FROM   [sys].[dm_server_services]
+												                                 WHERE  [servicename] LIKE 'SQL Server%'
+												                                   AND [servicename] NOT LIKE 'SQL Server Agent%'
+												                                   AND [servicename] NOT LIKE 'SQL Server Launchpad%'))
+                                    BEGIN
+								    INSERT  INTO #BlitzResults
+								    		( CheckID ,
+								    		  Priority ,
+								    		  FindingsGroup ,
+								    		  Finding ,
+								    		  URL ,
+								    		  Details
+								    		)
+								    		SELECT
+								    				 260 AS CheckID
+								    				,1 AS Priority
+								    				,'Security' AS FindingsGroup
+								    				,'Dangerous Service Account' AS Finding
+								    				,'https://vladdba.com/SQLServerSvcAccount' AS URL
+								    				,'SQL Server''s service account is a member of the local Administrators group - meaning that anyone who can use xp_cmdshell can do anything on the host.' as Details
+								    									    		
+								    END;
+								    
+                                 END;
+                            END;
+
+                        /* CheckID 261 - Security - SQL Server Agent service account is member of Administrators */
+						IF NOT EXISTS ( SELECT  1
+										FROM    #SkipChecks
+										WHERE   DatabaseName IS NULL AND CheckID = 261 ) AND @ProductVersionMajor >= 10 
+							BEGIN
+								
+								IF (SELECT value_in_use FROM  sys.configurations WHERE [name] = 'xp_cmdshell') = 1
+								AND EXISTS ( SELECT  1 FROM    sys.all_objects	WHERE   [name] = 'dm_server_services' )
+                                BEGIN
+                                    IF @Debug IN (1, 2) RAISERROR('Running CheckId [%d].', 0, 1, 261) WITH NOWAIT;
+									/*If this table exists and CheckId 260 was not skipped, then we're piggybacking off of 260's results */
+                                    IF OBJECT_ID('tempdb..#localadmins') IS NOT NULL 
+									   AND NOT EXISTS ( SELECT  1
+										                FROM    #SkipChecks
+										                WHERE   DatabaseName IS NULL AND CheckID = 260 )
+                                    BEGIN 
+									    IF @Debug IN (1, 2) RAISERROR('CheckId [%d] - found #localadmins table from CheckID 260 - no need to call xp_cmdshell again', 0, 1, 261) WITH NOWAIT;
+                                    
+                                        IF EXISTS (SELECT 1 
+                                                    FROM #localadmins 
+                                                    WHERE LOWER(cmdshell_output) = ( SELECT LOWER([service_account])
+												                                     FROM   [sys].[dm_server_services]
+												                                     WHERE  [servicename] LIKE 'SQL Server Agent%'
+												                                       AND [servicename] NOT LIKE 'SQL Server Launchpad%'))
+                                        BEGIN
+								        INSERT  INTO #BlitzResults
+								    		    ( CheckID ,
+								    		      Priority ,
+								    		      FindingsGroup ,
+								    		      Finding ,
+								    		      URL ,
+								    		      Details
+								    		    )
+								    		    SELECT
+								    		    		 261 AS CheckID
+								    		    		,1 AS Priority
+								    		    		,'Security' AS FindingsGroup
+									    				,'Dangerous Service Account' AS Finding
+									    				,'https://vladdba.com/SQLServerSvcAccount' AS URL
+								    		    		,'SQL Server Agent''s service account is a member of the local Administrators group - meaning that anyone who can create and run jobs can do anything on the host.' as Details
+								    									    		
+								        END;
+								    END; /*piggyback*/
+									ELSE /*can't piggyback*/
+									BEGIN
+									    /*had to use a different table name because SQL Server/SSMS complains when parsing that the table still exists when it gets to the create part*/
+									    IF OBJECT_ID('tempdb..#localadminsag') IS NOT NULL DROP TABLE #localadminsag;
+									    CREATE TABLE #localadminsag (cmdshell_output NVARCHAR(1000));
+										INSERT INTO #localadmins
+										EXEC /**/xp_cmdshell/**/ N'net localgroup administrators' /* added comments around command since some firewalls block this string TL 20210221 */
+                                    
+										IF EXISTS (SELECT 1 
+                                                FROM #localadmins 
+                                                WHERE LOWER(cmdshell_output) = ( SELECT LOWER([service_account])
+												                                 FROM   [sys].[dm_server_services]
+												                                 WHERE  [servicename] LIKE 'SQL Server Agent%'
+												                                   AND [servicename] NOT LIKE 'SQL Server Launchpad%'))
+										BEGIN
+								        INSERT  INTO #BlitzResults
+								    		    ( CheckID ,
+								    		      Priority ,
+								    		      FindingsGroup ,
+								    		      Finding ,
+								    		      URL ,
+								    		      Details
+								    		    )
+								    		    SELECT
+								    		    		 261 AS CheckID
+								    		    		,1 AS Priority
+								    		    		,'Security' AS FindingsGroup
+									    				,'Dangerous Service Account' AS Finding
+									    				,'https://vladdba.com/SQLServerSvcAccount' AS URL
+								    		    		,'SQL Server Agent''s service account is a member of the local Administrators group - meaning that anyone who can create and run jobs can do anything on the host.' as Details
+								    									    		
+								        END;
+
+									END;/*can't piggyback*/
+                                 END;
+                            END; /* CheckID 261 */
+
+
+						IF NOT EXISTS ( SELECT  1
+										FROM    #SkipChecks
+										WHERE   DatabaseName IS NULL AND CheckID = 266 )
+							BEGIN
+								INSERT  INTO #BlitzResults
+										( CheckID ,
+										  Priority ,
+										  FindingsGroup ,
+										  Finding ,
+										  URL ,
+										  Details
+										)
+										SELECT  266 AS CheckID ,
+												250 AS Priority ,
+												'Server Info' AS FindingsGroup ,
+												'Hardware - Memory Counters' AS Finding ,
+												'https://www.brentozar.com/go/target' AS URL ,
+												N'Target Server Memory (GB): ' + CAST((CAST((pTarget.cntr_value / 1024.0 / 1024.0) AS DECIMAL(10,1))) AS NVARCHAR(100))
+													+ N' Total Server Memory (GB): ' + CAST((CAST((pTotal.cntr_value / 1024.0 / 1024.0) AS DECIMAL(10,1))) AS NVARCHAR(100))
+										FROM    sys.dm_os_performance_counters pTarget
+										INNER JOIN sys.dm_os_performance_counters pTotal
+											ON pTotal.object_name LIKE 'SQLServer:Memory Manager%'
+											AND pTotal.counter_name LIKE 'Total Server Memory (KB)%'
+										WHERE pTarget.object_name LIKE 'SQLServer:Memory Manager%'
+										  AND pTarget.counter_name LIKE 'Target Server Memory (KB)%'
+							END
+
 
 
 					END; /* IF @CheckServerInfo = 1 */

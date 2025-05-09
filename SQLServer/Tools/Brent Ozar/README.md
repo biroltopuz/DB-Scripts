@@ -20,14 +20,11 @@ Navigation
    - [sp_BlitzIndex: Tune Your Indexes](#sp_blitzindex-tune-your-indexes)
      - [Advanced sp_BlitzIndex Parameters](#advanced-sp_blitzindex-parameters)
  - Performance Tuning:   
-   - [sp_BlitzInMemoryOLTP: Hekaton Analysis](#sp_blitzinmemoryoltp-hekaton-analysis) 
    - [sp_BlitzLock: Deadlock Analysis](#sp_blitzlock-deadlock-analysis) 
-   - [sp_BlitzQueryStore: Like BlitzCache, for Query Store](#sp_blitzquerystore-how-has-a-query-plan-changed-over-time)  
    - [sp_BlitzWho: What Queries are Running Now](#sp_blitzwho-what-queries-are-running-now)   
    - [sp_BlitzAnalysis: Query sp_BlitzFirst output tables](#sp_blitzanalysis-query-sp_BlitzFirst-output-tables) 
  - Backups and Restores:
    - [sp_BlitzBackups: How Much Data Could You Lose](#sp_blitzbackups-how-much-data-could-you-lose)  
-   - [sp_AllNightLog: Back Up Faster to Lose Less Data](#sp_allnightlog-back-up-faster-to-lose-less-data)  
    - [sp_DatabaseRestore: Easier Multi-File Restores](#sp_databaserestore-easier-multi-file-restores)  
  - [Parameters Common to Many of the Stored Procedures](#parameters-common-to-many-of-the-stored-procedures)
  - [License MIT](#license)
@@ -43,21 +40,24 @@ To install, [download the latest release ZIP](https://github.com/BrentOzarULTD/S
 
 The First Responder Kit runs on:
 
-* SQL Server 2012, 2014, 2016, 2017, 2019, 2022 on Windows - fully supported.
-* SQL Server on Linux - yes, fully supported except sp_AllNightLog and sp_DatabaseRestore, which require xp_cmdshell, which Microsoft doesn't provide on Linux.
-* SQL Server 2008 R2 and earlier - not supported since it's out of Microsoft support, but check the Deprecated folder for older versions of the scripts which may work, depending on your versions and compatibility levels.
+* SQL Server on Windows - all versions that Microsoft supports. For end of support dates, check out the "Support Ends" column at https://sqlserverupdates.com.
+* SQL Server on Linux - yes, fully supported except sp_DatabaseRestore, which require xp_cmdshell, which Microsoft doesn't provide on Linux.
 * Amazon RDS SQL Server - fully supported.
 * Azure SQL DB - not supported. Some of the procedures work, but some don't, and Microsoft has a tendency to change DMVs in Azure without warning, so we don't put any effort into supporting it. If it works, great! If not, any changes to make it work would be on you. [See the contributing.md file](CONTRIBUTING.md) for how to do that.
 
+If you're stuck with versions of SQL Server that Microsoft no longer supports, like SQL Server 2008, check the Deprecated folder for older versions of the scripts which may work, depending on your versions and compatibility levels.
+
 ## How to Install the Scripts
 
-There are three installation scripts. Choose the one that most suits your needs:
+For SQL Server, to install all of the scripts at once, open Install-All-Scripts.sql in SSMS or Azure Data Studio, switch to the database where you want to install the procs, and run it. It will install the stored procedures if they don't already exist, or update them to the current version if they do exist.
 
-* **Install-Core-Blitz-No-Query-Store.sql** - if you don't know which one to use, use this. This contains the most commonly used stored procedures. Open this script in SSMS or Azure Data Studio, switch to the database where you want to install the stored procedures, and run it. It will install the stored procedures if they don't already exist, or update them to the current version if they do exist. 
-* **Install-Core-Blitz-With-Query-Store.sql** - for SQL Server 2016 & newer only. Same as above, but adds sp_BlitzQueryStore.
-* **Install-All-Scripts.sql** - you're very clever (and also attractive), so as you may guess, this installs all of the scripts, including sp_DatabaseRestore and sp_AllNightLog, both of which depend on Ola Hallengren's Maintenance Solution. When running this script, you'll get warnings if you don't already have his scripts installed. To get those, go to https://ola.hallengren.com.
+For Azure SQL DB, use Install-Azure.sql, which will only install the procs that are compatible with Azure SQL DB.
+
+If you hit an error when running Install-All-Scripts, it's likely because you're using an older version of SQL Server that Microsoft no longer supports. In that case, check out the Deprecated folder. That's where we keep old versions of the scripts around as a last-ditch effort - but really, if Microsoft won't support their own old stuff, you shouldn't try to do it either.
 
 We recommend installing these stored procedures in the master database, but if you want to use another one, that's totally fine - they're all supported in any database - but just be aware that you can run into problems if you have these procs in multiple databases. You may not keep them all up to date, and you may hit an issue when you're running an older version.
+
+There are a couple of Install-Core scripts included for legacy purposes, for folks with installers they've built. You can ignore those.
 
 
 ## How to Get Support
@@ -216,7 +216,7 @@ Common sp_BlitzFirst parameters include:
 
 * @Seconds = 5 by default. You can specify longer samples if you want to track stats during a load test or demo, for example.
 * @ShowSleepingSPIDs = 0 by default. When set to 1, shows long-running sleeping queries that might be blocking others.
-* @ExpertMode = 0 by default. When set to 1, it calls sp_BlitzWho when it starts (to show you what queries are running right now), plus outputs additional result sets for wait stats, Perfmon counters, and file stats during the sample, then finishes with one final execution of sp_BlitzWho to show you what was running at the end of the sample.
+* @ExpertMode = 0 by default. When set to 1, it calls sp_BlitzWho when it starts (to show you what queries are running right now), plus outputs additional result sets for wait stats, Perfmon counters, and file stats during the sample, then finishes with one final execution of sp_BlitzWho to show you what was running at the end of the sample. When set to 2, it does the same as 1, but skips the calls to sp_BlitzWho.
 
 ### Logging sp_BlitzFirst to Tables
 
@@ -274,7 +274,6 @@ sp_BlitzIndex focuses on mainstream index types. Other index types have varying 
 
 * Fully supported: rowstore indexes, columnstore indexes, temporal tables.
 * Columnstore indexes: fully supported. Key columns are shown as includes rather than keys since they're not in a specific order.
-* In-Memory OLTP (Hekaton): unsupported. These objects show up in the results, but for more info, you'll want to use sp_BlitzInMemoryOLTP instead.
 * Graph tables: unsupported. These objects show up in the results, but we don't do anything special with 'em, like call out that they're graph tables.
 * Spatial indexes: unsupported. We call out that they're spatial, but we don't do any special handling for them.
 * XML indexes: unsupported. These objects show up in the results, but we don't include the index's columns or sizes.
@@ -290,21 +289,6 @@ In addition to the [parameters common to many of the stored procedures](#paramet
 * @SkipStatistics = 0 - right now, by default, we skip statistics analysis because we've had some performance issues on this.
 * @Filter = 0 (default) - 1=No low-usage warnings for objects with 0 reads. 2=Only warn for objects >= 500MB
 * @OutputDatabaseName, @OutputSchemaName, @OutputTableName - these only work for @Mode = 2, index usage detail.
-
-
-[*Back to top*](#header1)
-
-
-## sp_BlitzInMemoryOLTP: Hekaton Analysis
-
-Examines your usage of In-Memory OLTP tables. Parameters you can use:
-
-* @instanceLevelOnly BIT: This flag determines whether or not to simply report on the server-level environment (if applicable, i.e. there is no server-level environment for Azure SQL Database). With this parameter, memory-optimized databases are ignored. If you specify @instanceLevelOnly and a database name, the database name is ignored.
-* @dbName NVARCHAR(4000) = N'ALL' - If you don't specify a database name, then sp_BlitzInMemoryOLTP reports on all memory-optimized databases within the instance that it executes in, or in the case of Azure SQL Database, the database that you provisioned. This is because the default for the @dbName parameter is N'ALL'.
-* @tableName NVARCHAR(4000) = NULL
-* @debug BIT
-
-To interpret the output of this stored procedure, read [Ned Otter's sp_BlitzInMemoryOLTP documentation](http://nedotter.com/archive/2018/06/new-kid-on-the-block-sp_blitzinmemoryoltp/).
 
 
 [*Back to top*](#header1)
@@ -331,29 +315,6 @@ Known issues:
 
 * If your database has periods in the name, the deadlock report itself doesn't report the database name correctly. [More info in closed issue 2452.](https://github.com/BrentOzarULTD/SQL-Server-First-Responder-Kit/issues/2452)
 
-
-[*Back to top*](#header1)
-
-
-## sp_BlitzQueryStore: How Has a Query Plan Changed Over Time
-
-Analyzes data in Query Store schema (2016+ only) in many similar ways to what sp_BlitzCache does for the plan cache.
-
-* @Help: Right now this just prints the license if set to 1. I'm going to add better documentation here as the script matures.
-* @DatabaseName: This one is required. Query Store is per database, so you have to point it at one to examine.
-* @Top: How many plans from each "worst" you want to get. We look at your maxes for CPU, reads, duration, writes, memory, rows, executions, and additionally tempdb and log bytes for 2017. So it's the number of plans from each of those to gather.
-* @StartDate: Fairly obvious, when you want to start looking at queries from. If NULL, we'll only go back seven days.
-* @EndDate: When you want to stop looking at queries from. If you leave it NULL, we'll look ahead seven days.
-* @MinimumExecutionCount: The minimum number of times a query has to have been executed (not just compiled) to be analyzed.
-* @DurationFilter: The minimum number of seconds a query has to have been executed for to be analyzed.
-* @StoredProcName: If you want to look at a single stored procedure.
-* @Failed: If you want to look at failed queries, for some reason. I dunno, MS made such a big deal out of being able to look at these, I figured I'd add it.
-* @PlanIdFilter: If you want to filter by a particular plan id. Remember that a query may have many different plans.
-* @QueryIdFilter: If you want to filter by a particular query id. If you want to look at one specific plan for a query.
-* @ExportToExcel: Leaves XML out of the input and tidies up query text so you can easily paste it into Excel.
-* @HideSummary: Pulls the rolled up warnings and information out of the results.
-* @SkipXML: Skips XML analysis.
-* @Debug: Prints dynamic SQL and selects data from all temp tables if set to 1.
 
 [*Back to top*](#header1)
 
@@ -480,28 +441,6 @@ The reason behind that is, if you have 500 databases, and you're taking log back
 [*Back to top*](#header1)
 
 
-## sp_AllNightLog: Back Up Faster to Lose Less Data
-
-You manage a SQL Server instance with hundreds or thousands of mission-critical databases. You want to back them all up as quickly as possible, and one maintenance plan job isn't going to cut it.
-
-Let's scale out our backup jobs by:
-
-* Creating a table with a list of databases and their desired Recovery Point Objective (RPO, aka data loss) - done with sp_AllNightLog_Setup
-* Set up several Agent jobs to back up databases as necessary - also done with sp_AllNightLog_Setup
-* Inside each of those Agent jobs, they call sp_AllNightLog @Backup = 1, which loops through the table to find databases that need to be backed up, then call [Ola Hallengren's DatabaseBackup stored procedure](https://ola.hallengren.com/)
-* Keeping that database list up to date as new databases are added - done by a job calling sp_AllNightLog @PollForNewDatabases = 1
-
-For more information about how this works, see [sp_AllNightLog documentation.](https://www.BrentOzar.com/sp_AllNightLog)
-
-Known issues:
-
-* The msdbCentral database name is hard-coded.
-* sp_AllNightLog depends on Ola Hallengren's DatabaseBackup, which must be installed separately. (We expect it to be installed in the same database as the SQL Server First Responder Kit.)
-
-
-[*Back to top*](#header1)
-
-
 ## sp_DatabaseRestore: Easier Multi-File Restores
 
 If you use [Ola Hallengren's backup scripts](http://ola.hallengren.com), DatabaseRestore.sql helps you rapidly restore a database to the most recent point in time.
@@ -523,7 +462,7 @@ Parameters include:
 * @Debug - default 0. When 1, we print out messages of what we're doing in the messages tab of SSMS.
 * @StopAt NVARCHAR(14) - pass in a date time to stop your restores at a time like '20170508201501'. This doesn't use the StopAt parameter for the restore command - it simply stops restoring logs that would have this date/time's contents in it. (For example, if you're taking backups every 15 minutes on the hour, and you pass in 9:05 AM as part of the restore time, the restores would stop at your last log backup that doesn't include 9:05AM's data - but it won't restore right up to 9:05 AM.)
 * @SkipBackupsAlreadyInMsdb - default 0. When set to 1, we check MSDB for the most recently restored backup from this log path, and skip all backup files prior to that. Useful if you're pulling backups from across a slow network and you don't want to wait to check the restore header of each backup.
-
+* @EnableBroker - default 0. When set to 1, we run RESTORE WITH ENABLE_BROKER, enabling the service broker. Unless specified, the service broker is disabled on restore even if it was enabled when the backup was taken.
 
 For information about how this works, see [Tara Kizer's white paper on Log Shipping 2.0 with Google Compute Engine.](https://www.brentozar.com/archive/2017/03/new-white-paper-build-sql-server-disaster-recovery-plan-google-compute-engine/)
 

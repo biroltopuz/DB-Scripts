@@ -273,7 +273,8 @@ ALTER PROCEDURE dbo.sp_BlitzCache
 	@MinutesBack INT = NULL,
 	@Version     VARCHAR(30) = NULL OUTPUT,
 	@VersionDate DATETIME = NULL OUTPUT,
-	@VersionCheckMode BIT = 0
+	@VersionCheckMode BIT = 0,
+	@KeepCRLF BIT = 0
 WITH RECOMPILE
 AS
 BEGIN
@@ -281,7 +282,7 @@ SET NOCOUNT ON;
 SET STATISTICS XML OFF;
 SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
 
-SELECT @Version = '8.19', @VersionDate = '20240222';
+SELECT @Version = '8.24', @VersionDate = '20250407';
 SET @OutputType = UPPER(@OutputType);
 
 IF(@VersionCheckMode = 1)
@@ -468,7 +469,27 @@ IF @Help = 1
 	UNION ALL
 	SELECT N'@MinutesBack',
 			N'INT',
-			N'How many minutes back to begin plan cache analysis. If you put in a positive number, we''ll flip it to negative.';
+			N'How many minutes back to begin plan cache analysis. If you put in a positive number, we''ll flip it to negative.'
+
+	UNION ALL
+	SELECT N'@Version',
+			N'VARCHAR(30)',
+			N'OUTPUT parameter holding version number.'
+	
+	UNION ALL
+	SELECT N'@VersionDate',
+			N'DATETIME',
+			N'OUTPUT parameter holding version date.'
+
+	UNION ALL
+	SELECT N'@VersionCheckMode',
+			N'BIT',
+			N'Setting this to 1 will make the procedure stop after setting @Version and @VersionDate.'
+
+	UNION ALL
+	SELECT N'@KeepCRLF',
+			N'BIT',
+			N'Retain CR/LF in query text to avoid issues caused by line comments.';
 
 
 	/* Column definitions */
@@ -2745,7 +2766,10 @@ SET     PercentCPU = y.PercentCPU,
         /* Strip newlines and tabs. Tabs are replaced with multiple spaces
            so that the later whitespace trim will completely eliminate them
          */
-        QueryText = REPLACE(REPLACE(REPLACE(QueryText, @cr, ' '), @lf, ' '), @tab, '  ')
+        QueryText = CASE WHEN @KeepCRLF = 1 
+                         THEN REPLACE(QueryText, @tab, '  ')
+                         ELSE REPLACE(REPLACE(REPLACE(QueryText, @cr, ' '), @lf, ' '), @tab, '  ')
+					END
 FROM (
     SELECT  PlanHandle,
             CASE @total_cpu WHEN 0 THEN 0
@@ -2801,7 +2825,10 @@ SET     PercentCPU = y.PercentCPU,
         /* Strip newlines and tabs. Tabs are replaced with multiple spaces
            so that the later whitespace trim will completely eliminate them
          */
-        QueryText = REPLACE(REPLACE(REPLACE(QueryText, @cr, ' '), @lf, ' '), @tab, '  ')
+        QueryText = CASE WHEN @KeepCRLF = 1 
+                         THEN REPLACE(QueryText, @tab, '  ')
+                         ELSE REPLACE(REPLACE(REPLACE(QueryText, @cr, ' '), @lf, ' '), @tab, '  ')
+					END
 FROM (
     SELECT  DatabaseName,
             SqlHandle,
